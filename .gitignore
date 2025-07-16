@@ -1,1 +1,16 @@
-PX4-Autopilot/
+# Temporary files
+*.tlog
+*.tlog.raw
+mav.parm
+detailed_capture.txt
+hormone_capture.txt
+short_capture.txt
+
+# IDE files
+.vscode/
+# Backup files
+*_backup.py
+
+# PX4 logs and temporary files
+PX4-Autopilot/log/
+PX4-Autopilot/build/px4_sitl_default/rootfs/log/

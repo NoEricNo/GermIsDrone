@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Real multi-drone hormone system test
-Tests hormone propagation between actual PX4 instances
+Real multi-drone hormone system test with UDP fault injection support
+Modified to accept hormone injections from external fault injector
 """
 
 import asyncio
 import numpy as np
 import time
 import logging
+import socket
+import json
+import threading
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(name)s] - %(levelname)s - %(message)s')
 
 class DroneHormoneNode:
-    """Individual drone node with hormone system"""
+    """Individual drone node with hormone system - MODIFIED with external injection support"""
     
     def __init__(self, drone_id, port, decay_rate=0.9):
         self.drone_id = drone_id
@@ -195,11 +198,75 @@ class DroneHormoneNode:
                         f"Stress: {stress}, Coord: {coord}, Env: {env}")
 
 class SwarmCoordinator:
-    """Coordinates hormone sharing between drones"""
+    """Coordinates hormone sharing between drones - MODIFIED with UDP injection support"""
     
     def __init__(self):
         self.hormone_broadcasts = {}  # {drone_id: (timestamp, hormone_state)}
         self.logger = logging.getLogger("Swarm")
+        self.drones = {}  # {drone_id: DroneHormoneNode}
+        
+        # UDP server for external hormone injection
+        self.udp_port = 9999
+        self.udp_socket = None
+        self.udp_thread = None
+        self.setup_udp_listener()
+        
+    def setup_udp_listener(self):
+        """Set up UDP listener for external hormone injection commands"""
+        try:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.bind(('127.0.0.1', self.udp_port))
+            self.udp_socket.settimeout(1.0)  # Non-blocking with timeout
+            
+            # Start UDP listener thread
+            self.udp_thread = threading.Thread(target=self.udp_listener_thread, daemon=True)
+            self.udp_thread.start()
+            
+            self.logger.info(f"🔌 UDP injection listener started on port {self.udp_port}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start UDP listener: {e}")
+    
+    def udp_listener_thread(self):
+        """UDP listener thread - receives hormone injection commands"""
+        while True:
+            try:
+                data, addr = self.udp_socket.recvfrom(1024)
+                message = json.loads(data.decode())
+                
+                if message.get('command') == 'inject_hormone':
+                    self.process_external_hormone_injection(message)
+                    
+            except socket.timeout:
+                continue  # Normal timeout, keep listening
+            except Exception as e:
+                self.logger.debug(f"UDP listener error: {e}")
+    
+    def process_external_hormone_injection(self, message):
+        """Process external hormone injection command"""
+        try:
+            drone_id = message['drone_id']
+            hormone_type = message['hormone_type']
+            amount = message['amount']
+            reason = message['reason']
+            
+            self.logger.critical(f"🩸 EXTERNAL HORMONE INJECTION: Drone {drone_id} | "
+                               f"Type: {hormone_type}, Amount: {amount} | Reason: {reason}")
+            
+            # Find the drone and inject hormone
+            if drone_id in self.drones:
+                self.drones[drone_id].inject_hormone(hormone_type, amount, f"EXTERNAL: {reason}")
+                self.logger.info(f"✅ Successfully injected hormone into drone {drone_id}")
+            else:
+                self.logger.warning(f"⚠️ Drone {drone_id} not found for hormone injection")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to process external hormone injection: {e}")
+    
+    def register_drone(self, drone_id, drone_node):
+        """Register a drone with the coordinator"""
+        self.drones[drone_id] = drone_node
+        self.logger.info(f"📋 Registered drone {drone_id} with swarm coordinator")
         
     async def receive_hormone_broadcast(self, drone_id, hormone_state):
         """Receive hormone broadcast from a drone"""
@@ -244,10 +311,10 @@ class SwarmCoordinator:
         self.logger.info(f"🌐 Swarm State | Overall: {swarm_mean:.1f} | Individual: {' '.join(status_parts)}")
 
 async def test_multi_drone_swarm():
-    """Test real multi-drone hormone system"""
+    """Test real multi-drone hormone system with external injection support"""
     
     logger = logging.getLogger("Main")
-    logger.info("🚁 Starting Real Multi-Drone Hormone Test")
+    logger.info("🚁 Starting Real Multi-Drone Hormone Test with External Injection Support")
     
     # Configure drones (add more as you start more PX4 instances)
     drone_configs = [
@@ -270,15 +337,17 @@ async def test_multi_drone_swarm():
         
         if await drone.connect():
             drones.append(drone)
-            logger.info(f"✓ Drone {config['id']} ready")
+            coordinator.register_drone(config["id"], drone)  # Register with coordinator
+            logger.info(f"✓ Drone {config['id']} ready and registered")
         else:
             logger.error(f"✗ Failed to connect drone {config['id']}")
     
-    if len(drones) < 2:
-        logger.error("Need at least 2 drones connected for swarm test")
+    if len(drones) < 1:
+        logger.error("Need at least 1 drone connected for test")
         return
     
     logger.info(f"🚁 Starting swarm with {len(drones)} drones")
+    logger.info("🔌 External hormone injection ready on UDP port 9999")
     
     # Start monitoring tasks
     tasks = []
@@ -295,12 +364,15 @@ async def test_multi_drone_swarm():
     swarm_log_task = asyncio.create_task(log_swarm_periodically())
     tasks.append(swarm_log_task)
     
-    # Run for 5 minutes
+    # Run for 10 minutes (or until interrupted)
     try:
-        logger.info("🚀 Swarm monitoring active for 5 minutes...")
-        await asyncio.wait_for(asyncio.gather(*tasks), timeout=300)  # 5 minutes
+        logger.info("🚀 Swarm monitoring active for 10 minutes...")
+        logger.info("💡 You can now run fault injection from another terminal!")
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=600)  # 10 minutes
     except asyncio.TimeoutError:
-        logger.info("⏰ Test completed after 5 minutes")
+        logger.info("⏰ Test completed after 10 minutes")
+    except KeyboardInterrupt:
+        logger.info("🛑 Test stopped by user")
     
     # Cancel tasks
     for task in tasks:
