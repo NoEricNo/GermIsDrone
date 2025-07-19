@@ -14,3 +14,4 @@ short_capture.txt
 # PX4 logs and temporary files
 PX4-Autopilot/log/
 PX4-Autopilot/build/px4_sitl_default/rootfs/log/
+PX4-Autopilot/
